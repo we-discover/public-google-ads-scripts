@@ -51,8 +51,8 @@ function validateConfiguration(config) {
 }
 
 
-// Builds a query to pull raw data for a single test
-function buildQuery(config) {
+// Query the current account to get label IDs
+function getTestLabelIds(config) {
     var labelIds = [];
     var labelIterator = AdsApp.labels()
       .withCondition("Name CONTAINS '" + config.mvt_label + "'")
@@ -60,7 +60,11 @@ function buildQuery(config) {
     while (labelIterator.hasNext()) {
       labelIds.push(labelIterator.next().getId());
     }
+    return labelIds;
+}
 
+// Builds a query to pull raw data for a single test
+function buildQuery(config, labelIds) {
     return (" \
       SELECT \
           CustomerDescriptiveName \
@@ -146,8 +150,8 @@ function formatTestDataForExport(config, data) {
     'conversion_value'
   ]];
 
-  const accountName = AdsApp.currentAccount().getName();
-  const currency = AdsApp.currentAccount().getCurrencyCode();
+  var accountName = AdsApp.currentAccount().getName();
+  var currency = AdsApp.currentAccount().getCurrencyCode();
 
   for (var variantId in data) {
     for (var date in data[variantId]) {
