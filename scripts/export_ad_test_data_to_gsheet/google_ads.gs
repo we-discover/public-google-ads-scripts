@@ -245,11 +245,11 @@ function queryAndAggregateData(config, awqlQuery) {
         };
       }
 
-      dataObj[varId][date]['cost'] += Number(result["Cost"]) || 0;
-      dataObj[varId][date]['impressions'] += Number(result["Impressions"]) || 0;
-      dataObj[varId][date]['clicks'] += Number(result["Clicks"]) || 0;
-      dataObj[varId][date]['conversions'] += Number(result["Conversions"]) || 0;
-      dataObj[varId][date]['conversion_value'] += Number(result["ConversionValue"]) || 0;
+      dataObj[varId][date]['cost'] += Number(result["Cost"].replace(',', '')) || 0;
+      dataObj[varId][date]['impressions'] += Number(result["Impressions"].replace(',', '')) || 0;
+      dataObj[varId][date]['clicks'] += Number(result["Clicks"].replace(',', '')) || 0;
+      dataObj[varId][date]['conversions'] += Number(result["Conversions"].replace(',', '')) || 0;
+      dataObj[varId][date]['conversion_value'] += Number(result["ConversionValue"].replace(',', '')) || 0;
     }
 
     return dataObj;
