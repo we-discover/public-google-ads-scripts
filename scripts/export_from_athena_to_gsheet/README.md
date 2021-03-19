@@ -7,7 +7,8 @@ This Google Apps Script lets you query Athena directly and export the results to
 While this is a fairly niche use case, this is a situation we encountered for a client that was not
 trivial to solve so we thought we'd share the love to help anyone in a similar situation.
 
-# Usage
+
+## Usage
 
 1. Create a new [Google Apps Script Project](https://script.google.com/home).
 2. Copy the contents of each file - with a .gs` extension - in this folder to a corresponding file.
@@ -34,6 +35,7 @@ Credential                  | Description
 `AWS_SECRET_KEY`            | Your AWS secret key.
 `AWS_REGION`                | The region in which your AWS Athena service is hosted.
 `ATHENA_S3_OUTPUT_LOCATION` | `s3://aws-athena-query-results-{account_id}-{region}`
+
 
 ## Export configuration 
 
