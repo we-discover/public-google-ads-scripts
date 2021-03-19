@@ -2,14 +2,12 @@
 
 ![](/assets/export_from_athena_to_gsheet__1.png)
 
-*This is not an official Google product*
-
 This Google Apps Script lets you query Athena directly and export the results to a GSheet.
 
 While this is a fairly niche use case, this is a situation we encountered for a client that was not
 trivial to solve so we thought we'd share the love to help anyone in a similar situation.
 
-## Usage
+# Usage
 
 1. Create a new [Google Apps Script Project](https://script.google.com/home).
 2. Copy the contents of each file - with a .gs` extension - in this folder to a corresponding file.
@@ -21,7 +19,7 @@ wish export (see [export configuration](#export-configuration) for more details)
 5. (Optional) Schedule this script to run on a regular basis and keep whatever you need in GSheets 
 freshly up to date with data from Athena!
 
-### Credentials
+## Credentials
 
 Credentials are managed using using the Google Apps Scripts 
 [PropertiesService](https://developers.google.com/apps-script/reference/properties). In this script,
@@ -37,7 +35,7 @@ Credential                  | Description
 `AWS_REGION`                | The region in which your AWS Athena service is hosted.
 `ATHENA_S3_OUTPUT_LOCATION` | `s3://aws-athena-query-results-{account_id}-{region}`
 
-### Export configuration 
+## Export configuration 
 
 The object `exportConfigs` in `main.gs` is the section of this script in which you can specify the
 queries that you wish to run against your specified Athena database and where the outputs should be
