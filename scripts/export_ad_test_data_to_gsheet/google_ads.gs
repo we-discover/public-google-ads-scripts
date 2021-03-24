@@ -22,23 +22,37 @@ function main() {
       var account = accountIterator.next();
       AdsManagerApp.select(account);
       Logger.log('Info: Processing account ' + AdsApp.currentAccount().getName());
-      testConfigurations = runExportsForAccount(testConfigurations, gsheetId);
+      testConfigurations = extractDataForTestConfig(testConfigurations, gsheetId);
     }
     AdsManagerApp.select(managerAccount);
   }
 
   // If client account, run on that account only
   if (executionContext === 'client_account') {
-    testConfigurations = runExportsForAccount(testConfigurations, gsheetId);
+    testConfigurations = extractDataForTestConfig(testConfigurations, gsheetId);
+  }
+
+  // Loop through each test and export extracted data
+  for (var i = 0; i < testConfigurations.length; i++) {
+    // Export test data to Google Sheet
+    try {
+      exportDataToSheet(gsheetId, testConfigurations[i])
+    } catch (anyErrors) {
+      Logger.log(anyErrors);
+      // Mark data export for test as failure
+      testConfigurations[i]['success'] = false;
+      continue;
+    }
+    // Mark data export for test as success
+    testConfigurations[i]['success'] = true;
   }
 
   // Log test configurations with end state
   Logger.log(testConfigurations);
-
 }
 
 // Process that is run on each account
-function runExportsForAccount(testConfigurations, gsheetId) {
+function extractDataForTestConfig(testConfigurations, gsheetId) {
 
   // Loop through each test
   for (var i = 0; i < testConfigurations.length; i++) {
@@ -57,7 +71,6 @@ function runExportsForAccount(testConfigurations, gsheetId) {
     } catch (anyErrors) {
       Logger.log(anyErrors);
       Logger.log('Info: Skipping export for:' + accountTestMessage);
-      testConfigurations[i]['success'] = false;
       continue;
     }
 
@@ -65,7 +78,6 @@ function runExportsForAccount(testConfigurations, gsheetId) {
     if (!config.update) {
       Logger.log('Info: Update set to FALSE');
       Logger.log('Info: Skipping export for:' + accountTestMessage);
-      testConfigurations[i]['success'] = false;
       continue;
     }
 
@@ -74,7 +86,6 @@ function runExportsForAccount(testConfigurations, gsheetId) {
     if (testLabelIds.length < 1) {
       Logger.log('Info: No matching labels found in account');
       Logger.log('Info: Skipping export for:' + accountTestMessage);
-      testConfigurations[i]['success'] = false;
       continue;
     }
 
@@ -83,39 +94,21 @@ function runExportsForAccount(testConfigurations, gsheetId) {
       var awqlQuery = buildQuery(config, testLabelIds);
       // Query data for each ad in the test and aggregate
       var aggTestData = queryAndAggregateData(config, awqlQuery);
+      config['data'] = aggTestData;
       if (Object.keys(aggTestData).length === 0) {
-        Logger.log('Error: No data observed for test: ' + config.name);
-        Logger.log('Info: Skipping export for:' + accountTestMessage);
-        testConfigurations[i]['success'] = false;
+        Logger.log('Error: No data observed for test: ' + accountTestMessage);
         continue;
       }
-      // Format test data for export to GSheet
-      var formattedTestData = formatTestDataForExport(config, aggTestData);
     } catch (anyErrors) {
       Logger.log(anyErrors);
       Logger.log(awqlQuery);
       Logger.log('Info: Skipping export for:' + accountTestMessage);
-      testConfigurations[i]['success'] = false;
       continue;
     }
-
-    // Export test data to Google Sheet
-    try {
-      exportDataToSheet(gsheetId, config, formattedTestData)
-    } catch (anyErrors) {
-      Logger.log(anyErrors);
-      Logger.log('Info: Skipping export for:' + accountTestMessage);
-      testConfigurations[i]['success'] = false;
-      continue;
-    }
-
-    // Mark data export for test as success
-    testConfigurations[i]['success'] = true;
   }
 
   return testConfigurations;
 }
-
 
 // ========= UTILITY FUNCTIONS ==============================================================
 
@@ -146,6 +139,8 @@ function loadTestConfigsFromSheet(gsheetId) {
             o[h] = row[i];
             return o;
           }, {});
+          config['data'] = {};
+          config['success'] = false;
           testConfigurations.push(config);
         }
       });
@@ -159,13 +154,11 @@ function loadTestConfigsFromSheet(gsheetId) {
 
 // Runs some basic alidation on a single test config
 function validateConfiguration(config) {
-
   function assert(check, condition) {
     if (!condition) {
       throw new Error('Validation failed: ' + check);
     }
   }
-
   assert("start date formatted correctly", config.start_date.match('[0-9]{8}'));
   assert("end date formatted correctly",  config.end_date.match('[0-9]{8}'));
   assert("start date before end date", Number(config.start_date) < Number(config.end_date));
@@ -211,9 +204,9 @@ function buildQuery(config, labelIds) {
 // Extracts variant_id from labels
 function extractVariantIdFromLabels(config, labels) {
   var mvtLabel = config.mvt_label;
-  var matches = labels.match('(' + mvtLabel + ';var_id:[0-9]{1,3})');
+  var matches = labels.match('(' + mvtLabel + '\\$var_id:[0-9]{1,3})');
   if (matches) {
-    var variantPart = matches[0].split(';')[1];
+    var variantPart = matches[0].split('$')[1];
     return variantPart.replace('var_id:', '');
   }
 }
@@ -223,7 +216,7 @@ function extractVariantIdFromLabels(config, labels) {
 function queryAndAggregateData(config, awqlQuery) {
     var resultIterator = AdsApp.report(awqlQuery).rows();
 
-    var dataObj = {};
+    var dataObj = config['data'];
 
     while (resultIterator.hasNext()) {
       var result = resultIterator.next();
@@ -257,7 +250,7 @@ function queryAndAggregateData(config, awqlQuery) {
 
 
 // Converts aggregated test data into array based GSheet rows
-function formatTestDataForExport(config, data) {
+function formatTestDataForExport(config) {
   var output = [[
     'account_name',
     'currency',
@@ -272,6 +265,7 @@ function formatTestDataForExport(config, data) {
     'conversion_value'
   ]];
 
+  var data = config['data'];
   var accountName = AdsApp.currentAccount().getName();
   var currency = AdsApp.currentAccount().getCurrencyCode();
 
@@ -298,7 +292,10 @@ function formatTestDataForExport(config, data) {
 
 
 // Connects to a Google Sheet and writes data for a single test
-function exportDataToSheet(gsheetId, config, data) {
+function exportDataToSheet(gsheetId, config) {
+
+    var data = formatTestDataForExport(config);
+
     try {
       var spreadsheet = SpreadsheetApp.openById(gsheetId);
       Logger.log('Info: Sucessfully connected to sheet for test: ' + config.name);
@@ -316,5 +313,6 @@ function exportDataToSheet(gsheetId, config, data) {
 
     var importRange = importSheet.getRange(1, 1, data.length, data[0].length);
     importRange.setValues(data);
+    importSheet.hideSheet();
     Logger.log('Info: Sucessfully exported test data for test: ' + config.name);
 }
