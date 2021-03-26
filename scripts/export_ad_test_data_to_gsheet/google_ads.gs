@@ -49,6 +49,9 @@ function main() {
 
   // Log test configurations with end state
   Logger.log(testConfigurations);
+  
+  // Reset Test Name, Variant 1 and Variant 2
+  resetTestName(gsheetId)
 }
 
 // Process that is run on each account
@@ -315,4 +318,41 @@ function exportDataToSheet(gsheetId, config) {
     importRange.setValues(data);
     importSheet.hideSheet();
     Logger.log('Info: Sucessfully exported test data for test: ' + config.name);
+}
+
+
+// Resets 'Test Name' dropdown on 'Test Evaluation' sheet so data displayed upon entry
+function resetTestName(gSheetId) {
+    
+  // Sheets
+  var spreadsheet = SpreadsheetApp.openById(gSheetId);
+  var testEvalSheet = spreadsheet.getSheetByName('Test Evaluation: Overview');
+  var testDetailsSheet = spreadsheet.getSheetByName('Test details');
+  
+  // Ranges
+  var mainControlsRange = testEvalSheet.getRange(3, 11, 2, 1)
+  var abControlRange = testEvalSheet.getRange(40, 11, 1, 4)
+  var detailsTestRange = testDetailsSheet.getRange(2, 2, 1, 1)
+  var detailsVariantRange = testDetailsSheet.getRange(2, 4, 2, 1)
+  
+  // Cells
+  var mainTestCell = mainControlsRange.getCell(1, 1)
+  var abtestVariant1Cell = abControlRange.getCell(1, 1)
+  var abtestVariant2Cell = abControlRange.getCell(1, 4)
+  
+  //Values
+  var test1Cell = detailsTestRange.getCell(1, 1).getValue()
+  var variant1Cell = detailsVariantRange.getCell(1, 1).getValue()
+  var variant2Cell = detailsVariantRange.getCell(2, 1).getValue()
+  
+  // Set all to empty
+  mainTestCell.setValue('')
+  abtestVariant1Cell.setValue('')
+  abtestVariant2Cell.setValue('')
+  
+  // Set all to first valid entries
+  mainTestCell.setValue(test1Cell)
+  abtestVariant1Cell.setValue(variant1Cell)
+  abtestVariant2Cell.setValue(variant2Cell)
+  
 }
