@@ -36,7 +36,9 @@ function main() {
   for (var i = 0; i < testConfigurations.length; i++) {
     // Export test data to Google Sheet
     try {
-      exportDataToSheet(gsheetId, testConfigurations[i])
+      if (testConfigurations[i].update) {
+        exportDataToSheet(gsheetId, testConfigurations[i])
+      }
     } catch (anyErrors) {
       Logger.log(anyErrors);
       // Mark data export for test as failure
