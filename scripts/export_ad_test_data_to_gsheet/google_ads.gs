@@ -7,14 +7,13 @@ function main() {
 
   // Read all test configurations from GSheet
   const testConfigurations = loadTestConfigsFromSheet(gsheetId);
-  const expConfigurations = loadExpConfigsFromSheet(gsheetId)
-  
+
   // Determine runtime environment
   var executionContext = 'client_account';
   if (typeof AdsManagerApp != "undefined") {
     executionContext = 'manager_account';
   }
- 
+
   // If MCC, run process on a loop through all accounts
   if (executionContext === 'manager_account') {
     var managerAccount = AdsApp.currentAccount();
@@ -52,11 +51,11 @@ function main() {
 
   // Log test configurations with end state
   Logger.log(testConfigurations);
-  
+
   // Reset Test Name, Variant 1 and Variant 2
   resetTestName(gsheetId)
-  
-  
+
+
   // loop through all experiments defined in Experiment Details sheet
   for (i = 1; i < expConfigurations['lastRow']; i++) {
 
@@ -66,7 +65,7 @@ function main() {
     // export experiments data to evaluation sheet
     exportDailyExperimentData(gsheetId, expConfigurations)
   }
-  
+
 
 }
 
@@ -132,11 +131,11 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
 
 // creates config for each Experiment export
 function extractDataForExperimentConfig(expConfigurations, i) {
-  
+
   // read in variables from config
   searchRange = expConfigurations['searchRange']
   spreadsheet = expConfigurations['spreadsheet']
-  
+
   // manager Accounts
   var managerAccount = AdsApp.currentAccount();
   var accountIterator = AdsManagerApp.accounts().get();
@@ -179,7 +178,7 @@ function extractDataForExperimentConfig(expConfigurations, i) {
   // add control and variant layers to dataObj
   dataObj['data'][testName]['control'] = {};
   dataObj['data'][testName]['variant'] = {};
-  
+
   // add variables to experiments config
   expConfigurations['accountIterator'] = accountIterator
   expConfigurations['testName'] = testName
@@ -195,8 +194,36 @@ function extractDataForExperimentConfig(expConfigurations, i) {
 // ========= UTILITY FUNCTIONS ==============================================================
 
 
+// Extracts data from a test configuration sheet
+function extractConfigsFromConfigSheet(type, sheet) {
+    var configs = [];
+
+    var [rows, columns] = [sheet.getLastRow(), sheet.getLastColumn()];
+    var data = sheet.getRange(1, 1, rows, columns).getValues();
+    const header = data[0];
+
+    data.shift();
+    data.map(function(row) {
+      var empty = row[0] === '';
+      if (!empty) {
+        var config = header.reduce(function(o, h, i) {
+          o[h] = row[i];
+          return o;
+        }, {});
+        config['data'] = {};
+        config['success'] = false;
+        config['type'] = type;
+        configs.push(config);
+      }
+    });
+
+    return configs
+}
+
 // Function to load test configurations from GSheet
 function loadTestConfigsFromSheet(gsheetId) {
+    const testTypes = ['Ads', 'D&E']
+
     var testConfigurations = [];
 
     try {
@@ -207,25 +234,12 @@ function loadTestConfigsFromSheet(gsheetId) {
     }
 
     try {
-      var testConfigSheet = spreadsheet.getSheetByName('Google Ads - Test Details');
-
-      var [rows, columns] = [testConfigSheet.getLastRow(), testConfigSheet.getLastColumn()];
-      var data = testConfigSheet.getRange(1, 1, rows, columns).getValues();
-      const header = data[0];
-
-      data.shift();
-      data.map(function(row) {
-        var empty = row[0] === '';
-        if (!empty) {
-          var config = header.reduce(function(o, h, i) {
-            o[h] = row[i];
-            return o;
-          }, {});
-          config['data'] = {};
-          config['success'] = false;
-          testConfigurations.push(config);
-        }
-      });
+      for (i=0; i < testTypes.length; i++) {
+        var configSheetName = 'Google Ads Config - ' + testTypes[i];
+        var configSheet = spreadsheet.getSheetByName(configSheetName);
+        var typeConfigs = extractConfigsFromConfigSheet(testTypes[i], configSheet);
+        testConfigurations.push(typeConfigs);
+      }
     } catch (e) {
       throw Error('Failed to load test configurations from gsheet.')
     }
