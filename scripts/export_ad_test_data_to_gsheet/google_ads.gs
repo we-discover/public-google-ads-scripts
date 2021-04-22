@@ -85,13 +85,13 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
     // Extract data for the test, depending on its type
     try {
       if (test.type === 'Ads') {
-        // Create a query to pull test data
-        var awqlQuery = buildQuery(config);
-        // Query data for each ad in the test and aggregate
+        // Create a query to pull test data, aggregate against a label
+        var awqlQuery = buildQueryForAdsTest(config);
         var aggTestData = queryAndAggregateData(config, awqlQuery);
       }
       if (test.type === 'D&E') {
-        // Todo: Extract test data it can be set for the test config
+        // Identify experiment campaigns and their bases, extract data
+        var aggTestData = getDraftAndExperimentData(config);
       }
       config['data'] = aggTestData;
       if (Object.keys(aggTestData).length === 0) {
@@ -109,68 +109,6 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
   return testConfigurations;
 
 }
-
-// creates config for each Experiment export
-function extractDataForExperimentConfig(expConfigurations, i) {
-
-  // read in variables from config
-  searchRange = expConfigurations['searchRange']
-  spreadsheet = expConfigurations['spreadsheet']
-
-  // manager Accounts
-  var managerAccount = AdsApp.currentAccount();
-  var accountIterator = AdsManagerApp.accounts().get();
-
-  // define variables for experiment
-  var testName = searchRange.getCell(i, 1).getValue()
-  var startDate = searchRange.getCell(i, 2).getValue()
-  var endDate = searchRange.getCell(i, 3).getValue()
-  var experimentUpdate = searchRange.getCell(i, 4).getValue()
-
-  // create sheet for each experiment in MVT Testing gsheet
-  var exportSheetName = "Data Import: " + testName;
-  var exportSheet = spreadsheet.getSheetByName(exportSheetName);
-  if (exportSheet === null) {
-    exportSheet = spreadsheet.insertSheet(exportSheetName, 99);
-  }
-  exportSheet.clear();
-  Logger.log('Info: Sucessfully loaded data import sheet for test: ' + testName);
-
-  // create export array for sending data to gsheet
-  var outputEntities = [[
-    'account_name',
-    'currency',
-    'test_name',
-    'experiment_label',
-    'variant_id',
-    'date',
-    'cost',
-    'impressions',
-    'clicks',
-    'conversions',
-    'conversion_value'
-  ]]
-
-  // create data object for aggregated test data
-  dataObj = {}
-  dataObj['data'] = {}
-  // add testName layer to dataObj
-  dataObj['data'][testName] = {}
-  // add control and variant layers to dataObj
-  dataObj['data'][testName]['control'] = {};
-  dataObj['data'][testName]['variant'] = {};
-
-  // add variables to experiments config
-  expConfigurations['accountIterator'] = accountIterator
-  expConfigurations['testName'] = testName
-  expConfigurations['startDate'] = startDate
-  expConfigurations['endDate'] = endDate
-  expConfigurations['experimentUpdate'] = experimentUpdate
-  expConfigurations['outputEntities'] = outputEntities
-  expConfigurations['exportSheet'] = exportSheet
-
-}
-
 
 // ========= UTILITY FUNCTIONS ==============================================================
 
@@ -201,6 +139,7 @@ function extractConfigsFromConfigSheet(type, sheet) {
     return configs
 }
 
+
 // Function to load test configurations from GSheet
 function loadTestConfigsFromSheet(gsheetId) {
     const testTypes = ['Ads', 'D&E']
@@ -228,6 +167,7 @@ function loadTestConfigsFromSheet(gsheetId) {
     return testConfigurations;
 }
 
+
 // Runs some basic alidation on a single test config
 function validateConfiguration(config) {
   function assert(check, condition) {
@@ -243,6 +183,7 @@ function validateConfiguration(config) {
   }
 }
 
+
 // Query the current account to get label IDs
 function getTestLabelIds(config) {
     var labelIds = [];
@@ -255,6 +196,7 @@ function getTestLabelIds(config) {
     return labelIds;
 }
 
+
 // Extracts variant_id from labels
 function extractVariantIdFromLabels(config, labels) {
   var mvtLabel = config.mvt_label;
@@ -265,8 +207,9 @@ function extractVariantIdFromLabels(config, labels) {
   }
 }
 
+
 // Builds a query to pull raw data for a single test
-function buildQuery(config) {
+function buildQueryForAdsTest(config) {
 
     // Check if test labels exists in current account
     var testLabelIds = getTestLabelIds(config);
@@ -296,8 +239,6 @@ function buildQuery(config) {
         config.start_date + "," + config.end_date
     ).replace(/ +(?= )/g, '');
 }
-
-
 
 
 // Runs AWQL query and aggregates data on a daily variant level
@@ -334,6 +275,68 @@ function queryAndAggregateData(config, awqlQuery) {
     }
 
     return dataObj;
+}
+
+
+// Identify experiment campaigns and extract data for it and its base campaign
+function getDraftAndExperimentData(config) {
+
+    var dataObj = config['data'];
+
+    var campaignIterator = AdsApp.campaigns()
+        .withCondition("Name CONTAINS " + config.mvt_label)
+        .get();
+
+    // Identify campaigns and experiments belonging to the test and extract the data
+    while (campaignIterator.hasNext()) {
+        const experiment = campaignIterator.next();
+        if (!experiment.isExperimentCampaign()) {
+            throw new Exception('Campaign experiment identification issue')
+        }
+
+        var campaignTestVariants = {
+            'control': experiment.getBaseCampaign(),
+            'variant': experiment
+        }
+
+        for (i=0; i < 2, i++) {
+            var variantType = Object.keys(campaignTestVariants)[i];
+
+            if (!dataObj.hasOwnProperty(variantType)) {
+                dataObj[variantType] = {};
+            }
+
+            var date = experiment.startDate;;
+            while (date <= experiment.endDate;) {
+                if (!dataObj[variantType].hasOwnProperty(date)) {
+                    dataObj[variantType][date] = {
+                        'cost': 0,
+                        'impressions': 0,
+                        'clicks': 0,
+                        'conversions': 0,
+                        'conversion_value': 0
+                    };
+                }
+
+                var stats = campaignTestVariants[i].getStatsFor(
+                    Utilities.formatDate(date, account.getTimeZone(), "yyyyMMdd"),
+                    Utilities.formatDate(date, account.getTimeZone(), "yyyyMMdd")
+                )
+
+                dataObj[variantType][date]['cost'] += stats.getCost();
+                dataObj[variantType][date]['impressions'] += stats.getImpressions();
+                dataObj[variantType][date]['clicks'] += stats.getClicks();
+                dataObj[variantType][date]['conversions'] += stats.getConversions();
+                // Todo: Find alternative for conversion value
+
+                date.setDate(date.getDate() + 1);
+            }
+
+        }
+    }
+
+    return dataObj;
+
 }
 
 
@@ -440,151 +443,4 @@ function resetTestName(gSheetId) {
   abtestVariant1Cell.setValue(variant1Cell)
   abtestVariant2Cell.setValue(variant2Cell)
   
-}
-  
-
-function exportDailyExperimentData(gsheetId, expConfigurations) {
-  
-  // read in variables from config
-  accountIterator = expConfigurations['accountIterator']
-  testName = expConfigurations['testName']
-  startDate = expConfigurations['startDate']
-  endDate = expConfigurations['endDate']
-  experimentUpdate = expConfigurations['experimentUpdate']
-  outputEntities = expConfigurations['outputEntities']
-  exportSheet = expConfigurations['exportSheet']
-
-  // Iterate through the list of accounts
-  while (accountIterator.hasNext()) {
-    var account = accountIterator.next();
-
-    // Select the client account and get currency and timezone
-    AdsManagerApp.select(account);
-    var accountName = account.getName()
-    var accountCurrency = account.getCurrencyCode()
-    var timeZone = account.getTimeZone()
-
-    // while start date is less than or equal to end date
-    while (startDate <= endDate) {
-
-      // Select campaigns under the client account
-      var campaignSelector = AdsApp.campaigns()
-      var campaignIterator = campaignSelector.get()
-
-
-      // iterate through campaigns
-      while (campaignIterator.hasNext()) {
-
-        var campaign = campaignIterator.next();
-        var campaignString = campaign.toString()
-        var campaignName = campaign.getName()
-
-
-        // check if campaign is Experiment, same as the config sheet, and update set to True
-        if (campaign.isExperimentCampaign() && campaignString.indexOf(testName) != -1 && experimentUpdate) {
-
-          // get experiment and base campaign names, define date as date string
-          var expCampaign = campaign
-          var baseCampaign = campaign.getBaseCampaign()
-          var date = Utilities.formatDate(startDate, timeZone, "dd/MM/yyyy")
-
-          // create empty dicts for base campaigns
-          dataObj['data'][testName]['control'][date] = {
-            'account_name': accountName,
-            'currency': accountCurrency,
-            'cost': 0,
-            'impressions': 0,
-            'clicks': 0,
-            'conversions': 0,
-            'conversion_value': 0
-          }
-
-          // get and add data for base campaign
-          var baseStats = baseCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
-                                                   Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
-          var cost = baseStats.getCost()
-          var impressions = baseStats.getImpressions()
-          var clicks = baseStats.getClicks()
-          var conversions = baseStats.getConversions()
-
-          dataObj['data'][testName]['control'][date]['cost'] += cost;
-          dataObj['data'][testName]['control'][date]['impressions'] += impressions;
-          dataObj['data'][testName]['control'][date]['clicks'] += clicks;
-          dataObj['data'][testName]['control'][date]['conversions'] += conversions;
-          dataObj['data'][testName]['control'][date]['conversion_value'] += 0;
-
-
-          // create empty dicts for experiment campaigns
-          dataObj['data'][testName]['variant'][date] = {
-            'account_name': accountName,
-            'currency': accountCurrency,
-            'cost': 0,
-            'impressions': 0,
-            'clicks': 0,
-            'conversions': 0,
-            'conversion_value': 0
-          }
-
-          // get data for experiment campaign
-          var expStats = expCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
-                                                 Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
-          var cost = expStats.getCost()
-          var impressions = expStats.getImpressions()
-          var clicks = expStats.getClicks()
-          var conversions = expStats.getConversions()
-
-          dataObj['data'][testName]['variant'][date]['cost'] += cost;
-          dataObj['data'][testName]['variant'][date]['impressions'] += impressions;
-          dataObj['data'][testName]['variant'][date]['clicks'] += clicks;
-          dataObj['data'][testName]['variant'][date]['conversions'] += conversions;
-          dataObj['data'][testName]['variant'][date]['conversion_value'] += 0;
-        }
-      }
-
-      // increment date by one day
-      startDate.setDate(startDate.getDate() + 1)
-
-    }
-  }
-
-  for (var testName in dataObj['data']) {
-    for (var date in dataObj['data'][testName]['control']) {
-      outputEntities.push([
-        dataObj['data'][testName]['control'][date]['account_name'],
-        dataObj['data'][testName]['control'][date]['currency'],
-        testName,
-        'control',
-        1,
-        date,
-        dataObj['data'][testName]['control'][date]['cost'],
-        dataObj['data'][testName]['control'][date]['impressions'],
-        dataObj['data'][testName]['control'][date]['clicks'],
-        dataObj['data'][testName]['control'][date]['conversions'],
-        dataObj['data'][testName]['control'][date]['conversion_value']
-      ])
-    }
-
-    for (var date in dataObj['data'][testName]['variant']) {
-      outputEntities.push([
-        dataObj['data'][testName]['control'][date]['account_name'],
-        dataObj['data'][testName]['control'][date]['currency'],
-        testName,
-        'variant',
-        2,
-        date,
-        dataObj['data'][testName]['variant'][date]['cost'],
-        dataObj['data'][testName]['variant'][date]['impressions'],
-        dataObj['data'][testName]['variant'][date]['clicks'],
-        dataObj['data'][testName]['variant'][date]['conversions'],
-        dataObj['data'][testName]['variant'][date]['conversion_value']
-      ])
-    }
-  }
-
-  var exportRange = exportSheet.getRange(1, 1, outputEntities.length, outputEntities[0].length);
-  exportRange.setValues(outputEntities);
-  exportSheet.hideSheet();
-  Logger.log('Info: Sucessfully exported test data for test: ' + testName);
-  Logger.log(dataObj)
-   
 }
