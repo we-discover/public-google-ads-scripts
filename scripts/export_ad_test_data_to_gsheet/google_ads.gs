@@ -7,13 +7,14 @@ function main() {
 
   // Read all test configurations from GSheet
   const testConfigurations = loadTestConfigsFromSheet(gsheetId);
-
+  const expConfigurations = loadExpConfigsFromSheet(gsheetId)
+  
   // Determine runtime environment
   var executionContext = 'client_account';
   if (typeof AdsManagerApp != "undefined") {
     executionContext = 'manager_account';
   }
-
+ 
   // If MCC, run process on a loop through all accounts
   if (executionContext === 'manager_account') {
     var managerAccount = AdsApp.currentAccount();
@@ -55,8 +56,18 @@ function main() {
   // Reset Test Name, Variant 1 and Variant 2
   resetTestName(gsheetId)
   
-  // run experiments data script
-  getDailyExperimentData(gsheetId)
+  
+  // loop through all experiments defined in Experiment Details sheet
+  for (i = 1; i < expConfigurations['lastRow']; i++) {
+
+    // extract configurations for experiments data
+    extractDataForExperimentConfig(expConfigurations, i)
+
+    // export experiments data to evaluation sheet
+    exportDailyExperimentData(gsheetId, expConfigurations)
+  }
+  
+
 }
 
 // Process that is run on each account
@@ -119,6 +130,68 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
 
 }
 
+// creates config for each Experiment export
+function extractDataForExperimentConfig(expConfigurations, i) {
+  
+  // read in variables from config
+  searchRange = expConfigurations['searchRange']
+  spreadsheet = expConfigurations['spreadsheet']
+  
+  // manager Accounts
+  var managerAccount = AdsApp.currentAccount();
+  var accountIterator = AdsManagerApp.accounts().get();
+
+  // define variables for experiment
+  var testName = searchRange.getCell(i, 1).getValue()
+  var startDate = searchRange.getCell(i, 2).getValue()
+  var endDate = searchRange.getCell(i, 3).getValue()
+  var experimentUpdate = searchRange.getCell(i, 4).getValue()
+
+  // create sheet for each experiment in MVT Testing gsheet
+  var exportSheetName = "Data Import: " + testName;
+  var exportSheet = spreadsheet.getSheetByName(exportSheetName);
+  if (exportSheet === null) {
+    exportSheet = spreadsheet.insertSheet(exportSheetName, 99);
+  }
+  exportSheet.clear();
+  Logger.log('Info: Sucessfully loaded data import sheet for test: ' + testName);
+
+  // create export array for sending data to gsheet
+  var outputEntities = [[
+    'account_name',
+    'currency',
+    'test_name',
+    'experiment_label',
+    'variant_id',
+    'date',
+    'cost',
+    'impressions',
+    'clicks',
+    'conversions',
+    'conversion_value'
+  ]]
+
+  // create data object for aggregated test data
+  dataObj = {}
+  dataObj['data'] = {}
+  // add testName layer to dataObj
+  dataObj['data'][testName] = {}
+  // add control and variant layers to dataObj
+  dataObj['data'][testName]['control'] = {};
+  dataObj['data'][testName]['variant'] = {};
+  
+  // add variables to experiments config
+  expConfigurations['accountIterator'] = accountIterator
+  expConfigurations['testName'] = testName
+  expConfigurations['startDate'] = startDate
+  expConfigurations['endDate'] = endDate
+  expConfigurations['experimentUpdate'] = experimentUpdate
+  expConfigurations['outputEntities'] = outputEntities
+  expConfigurations['exportSheet'] = exportSheet
+
+}
+
+
 // ========= UTILITY FUNCTIONS ==============================================================
 
 
@@ -158,6 +231,30 @@ function loadTestConfigsFromSheet(gsheetId) {
     }
 
     return testConfigurations;
+}
+
+// Function to load experiments configurations from GSheet
+function loadExpConfigsFromSheet(gsheetId) {
+  
+  var expConfigurations = {}
+  
+  try {
+    var spreadsheet = SpreadsheetApp.openById(gsheetId);
+    Logger.log('Info: Sucessfully connected to sheet');
+  } catch (e) {
+    throw Error('Connection to sheet failed')
+  }
+  var experimentSheet = spreadsheet.getSheetByName('Experiment Details');
+  var experimentLastRow = experimentSheet.getLastRow();
+  var experimentSearchRange = experimentSheet.getRange(2, 1, experimentLastRow, 4);
+  
+  expConfigurations['sheet'] = experimentSheet
+  expConfigurations['lastRow'] = experimentLastRow
+  expConfigurations['searchRange'] = experimentSearchRange
+  expConfigurations['spreadsheet'] = spreadsheet
+  
+  return expConfigurations
+  
 }
 
 
@@ -363,204 +460,149 @@ function resetTestName(gSheetId) {
   
 }
   
+
+function exportDailyExperimentData(gsheetId, expConfigurations) {
   
-//--------------------------------------------------------------
+  // read in variables from config
+  accountIterator = expConfigurations['accountIterator']
+  testName = expConfigurations['testName']
+  startDate = expConfigurations['startDate']
+  endDate = expConfigurations['endDate']
+  experimentUpdate = expConfigurations['experimentUpdate']
+  outputEntities = expConfigurations['outputEntities']
+  exportSheet = expConfigurations['exportSheet']
 
-function getDailyExperimentData(gsheetId) {
-  
-  // config variables from Experiment Details sheet
-  try {
-    var spreadsheet = SpreadsheetApp.openById(gsheetId);
-    Logger.log('Info: Sucessfully connected to sheet');
-  } catch (e) {
-    throw Error('Connection to sheet failed')
-  }
-  var experimentSheet = spreadsheet.getSheetByName('Experiment Details');
-  var experimentLastRow = experimentSheet.getLastRow();
-  var experimentSearchRange = experimentSheet.getRange(2, 1, experimentLastRow, 4);
-  
-  // loop through rows in config sheet
-  for (i = 1; i < experimentLastRow; i++) {
-    
-    // manager Accounts
-    var managerAccount = AdsApp.currentAccount();
-    var accountIterator = AdsManagerApp.accounts().get();
+  // Iterate through the list of accounts
+  while (accountIterator.hasNext()) {
+    var account = accountIterator.next();
 
-    // define variables for experiment
-    var testName = experimentSearchRange.getCell(i, 1).getValue()
-    var startDate = experimentSearchRange.getCell(i, 2).getValue()
-    var endDate = experimentSearchRange.getCell(i, 3).getValue()
-    var experimentUpdate = experimentSearchRange.getCell(i, 4).getValue()
-    
-    // create sheet for each experiment in MVT Testing gsheet
-    var exportSheetName = "Data Import: " + testName;
-    var exportSheet = spreadsheet.getSheetByName(exportSheetName);
-    if (exportSheet === null) {
-      exportSheet = spreadsheet.insertSheet(exportSheetName, 99);
-    }
-    exportSheet.clear();
-    Logger.log('Info: Sucessfully loaded data import sheet for test: ' + testName);
-    
-    // create export array for sending data to gsheet
-    var outputEntities = [[
-        'account_name',
-        'currency',
-        'test_name',
-        'experiment_label',
-        'variant_id',
-        'date',
-        'cost',
-        'impressions',
-        'clicks',
-        'conversions',
-        'conversion_value'
-      ]]
-    
-    // create data object for aggregated test data
-    dataObj = {}
-    dataObj['data'] = {}
-    // add testName layer to dataObj
-    dataObj['data'][testName] = {}
-    // add control and variant layers to dataObj
-    dataObj['data'][testName]['control'] = {};
-    dataObj['data'][testName]['variant'] = {};
-    Logger.log(dataObj)
-    
-    // Iterate through the list of accounts
-    while (accountIterator.hasNext()) {
-      var account = accountIterator.next();
+    // Select the client account and get currency and timezone
+    AdsManagerApp.select(account);
+    var accountName = account.getName()
+    var accountCurrency = account.getCurrencyCode()
+    var timeZone = account.getTimeZone()
 
-      // Select the client account and get currency and timezone
-      AdsManagerApp.select(account);
-      var accountName = account.getName()
-      var accountCurrency = account.getCurrencyCode()
-      var timeZone = account.getTimeZone()
-      
-      // while start date is less than or equal to end date
-      while (startDate <= endDate) {
-        
-        Logger.log(Utilities.formatDate(startDate, timeZone, "dd/MM/yyyy"))
-        // Select campaigns under the client account
-        var campaignSelector = AdsApp.campaigns()
-        var campaignIterator = campaignSelector.get()
-        
-        
-        // iterate through campaigns
-        while (campaignIterator.hasNext()) {
+    // while start date is less than or equal to end date
+    while (startDate <= endDate) {
 
-          var campaign = campaignIterator.next();
-          var campaignString = campaign.toString()
-          var campaignName = campaign.getName()
+      // Select campaigns under the client account
+      var campaignSelector = AdsApp.campaigns()
+      var campaignIterator = campaignSelector.get()
 
-          
-          // check if campaign is Experiment, same as the config sheet, and update set to True
-          if (campaign.isExperimentCampaign() && campaignString.indexOf(testName) != -1 && experimentUpdate) {
-            
-            // get experiment and base campaign names, define date as date string
-            var expCampaign = campaign
-            var baseCampaign = campaign.getBaseCampaign()
-            var date = Utilities.formatDate(startDate, timeZone, "dd/MM/yyyy")
-            
-            // create empty dicts for base campaigns
-            dataObj['data'][testName]['control'][date] = {
-              'account_name': accountName,
-              'currency': accountCurrency,
-              'cost': 0,
-              'impressions': 0,
-              'clicks': 0,
-              'conversions': 0,
-              'conversion_value': 0
-            }
-            
-            // get and add data for base campaign
-            var baseStats = baseCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
-                                                     Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
-            var cost = baseStats.getCost()
-            var impressions = baseStats.getImpressions()
-            var clicks = baseStats.getClicks()
-            var conversions = baseStats.getConversions()
 
-            dataObj['data'][testName]['control'][date]['cost'] += cost;
-            dataObj['data'][testName]['control'][date]['impressions'] += impressions;
-            dataObj['data'][testName]['control'][date]['clicks'] += clicks;
-            dataObj['data'][testName]['control'][date]['conversions'] += conversions;
-            dataObj['data'][testName]['control'][date]['conversion_value'] += 0;
-            
-            
-            // create empty dicts for experiment campaigns
-            dataObj['data'][testName]['variant'][date] = {
-              'account_name': accountName,
-              'currency': accountCurrency,
-              'cost': 0,
-              'impressions': 0,
-              'clicks': 0,
-              'conversions': 0,
-              'conversion_value': 0
-            }
-            
-            // get data for experiment campaign
-            var expStats = expCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
-                                                   Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
-            var cost = expStats.getCost()
-            var impressions = expStats.getImpressions()
-            var clicks = expStats.getClicks()
-            var conversions = expStats.getConversions()
+      // iterate through campaigns
+      while (campaignIterator.hasNext()) {
 
-            dataObj['data'][testName]['variant'][date]['cost'] += cost;
-            dataObj['data'][testName]['variant'][date]['impressions'] += impressions;
-            dataObj['data'][testName]['variant'][date]['clicks'] += clicks;
-            dataObj['data'][testName]['variant'][date]['conversions'] += conversions;
-            dataObj['data'][testName]['variant'][date]['conversion_value'] += 0;
+        var campaign = campaignIterator.next();
+        var campaignString = campaign.toString()
+        var campaignName = campaign.getName()
+
+
+        // check if campaign is Experiment, same as the config sheet, and update set to True
+        if (campaign.isExperimentCampaign() && campaignString.indexOf(testName) != -1 && experimentUpdate) {
+
+          // get experiment and base campaign names, define date as date string
+          var expCampaign = campaign
+          var baseCampaign = campaign.getBaseCampaign()
+          var date = Utilities.formatDate(startDate, timeZone, "dd/MM/yyyy")
+
+          // create empty dicts for base campaigns
+          dataObj['data'][testName]['control'][date] = {
+            'account_name': accountName,
+            'currency': accountCurrency,
+            'cost': 0,
+            'impressions': 0,
+            'clicks': 0,
+            'conversions': 0,
+            'conversion_value': 0
           }
+
+          // get and add data for base campaign
+          var baseStats = baseCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
+                                                   Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
+          var cost = baseStats.getCost()
+          var impressions = baseStats.getImpressions()
+          var clicks = baseStats.getClicks()
+          var conversions = baseStats.getConversions()
+
+          dataObj['data'][testName]['control'][date]['cost'] += cost;
+          dataObj['data'][testName]['control'][date]['impressions'] += impressions;
+          dataObj['data'][testName]['control'][date]['clicks'] += clicks;
+          dataObj['data'][testName]['control'][date]['conversions'] += conversions;
+          dataObj['data'][testName]['control'][date]['conversion_value'] += 0;
+
+
+          // create empty dicts for experiment campaigns
+          dataObj['data'][testName]['variant'][date] = {
+            'account_name': accountName,
+            'currency': accountCurrency,
+            'cost': 0,
+            'impressions': 0,
+            'clicks': 0,
+            'conversions': 0,
+            'conversion_value': 0
+          }
+
+          // get data for experiment campaign
+          var expStats = expCampaign.getStatsFor(Utilities.formatDate(startDate, timeZone, "yyyyMMdd"),
+                                                 Utilities.formatDate(startDate, timeZone, "yyyyMMdd"))
+          var cost = expStats.getCost()
+          var impressions = expStats.getImpressions()
+          var clicks = expStats.getClicks()
+          var conversions = expStats.getConversions()
+
+          dataObj['data'][testName]['variant'][date]['cost'] += cost;
+          dataObj['data'][testName]['variant'][date]['impressions'] += impressions;
+          dataObj['data'][testName]['variant'][date]['clicks'] += clicks;
+          dataObj['data'][testName]['variant'][date]['conversions'] += conversions;
+          dataObj['data'][testName]['variant'][date]['conversion_value'] += 0;
         }
-        
-        // increment date by one day
-        startDate.setDate(startDate.getDate() + 1)
-        
-      }
-    }
-    
-    Logger.log(dataObj)
-    
-    for (var testName in dataObj['data']) {
-      for (var date in dataObj['data'][testName]['control']) {
-        Logger.log(date)
-        outputEntities.push([
-          dataObj['data'][testName]['control'][date]['account_name'],
-          dataObj['data'][testName]['control'][date]['currency'],
-          testName,
-          'control',
-          1,
-          date,
-          dataObj['data'][testName]['control'][date]['cost'],
-          dataObj['data'][testName]['control'][date]['impressions'],
-          dataObj['data'][testName]['control'][date]['clicks'],
-          dataObj['data'][testName]['control'][date]['conversions'],
-          dataObj['data'][testName]['control'][date]['conversion_value']
-        ])
       }
 
-      for (var date in dataObj['data'][testName]['variant']) {
-        outputEntities.push([
-          dataObj['data'][testName]['control'][date]['account_name'],
-          dataObj['data'][testName]['control'][date]['currency'],
-          testName,
-          'variant',
-          2,
-          date,
-          dataObj['data'][testName]['variant'][date]['cost'],
-          dataObj['data'][testName]['variant'][date]['impressions'],
-          dataObj['data'][testName]['variant'][date]['clicks'],
-          dataObj['data'][testName]['variant'][date]['conversions'],
-          dataObj['data'][testName]['variant'][date]['conversion_value']
-        ])
-      }
-    }
+      // increment date by one day
+      startDate.setDate(startDate.getDate() + 1)
 
-    var exportRange = exportSheet.getRange(1, 1, outputEntities.length, outputEntities[0].length);
-    exportRange.setValues(outputEntities);
-    exportSheet.hideSheet();
-    Logger.log('Info: Sucessfully exported test data for test: ' + testName);
-   
+    }
   }
+
+  for (var testName in dataObj['data']) {
+    for (var date in dataObj['data'][testName]['control']) {
+      outputEntities.push([
+        dataObj['data'][testName]['control'][date]['account_name'],
+        dataObj['data'][testName]['control'][date]['currency'],
+        testName,
+        'control',
+        1,
+        date,
+        dataObj['data'][testName]['control'][date]['cost'],
+        dataObj['data'][testName]['control'][date]['impressions'],
+        dataObj['data'][testName]['control'][date]['clicks'],
+        dataObj['data'][testName]['control'][date]['conversions'],
+        dataObj['data'][testName]['control'][date]['conversion_value']
+      ])
+    }
+
+    for (var date in dataObj['data'][testName]['variant']) {
+      outputEntities.push([
+        dataObj['data'][testName]['control'][date]['account_name'],
+        dataObj['data'][testName]['control'][date]['currency'],
+        testName,
+        'variant',
+        2,
+        date,
+        dataObj['data'][testName]['variant'][date]['cost'],
+        dataObj['data'][testName]['variant'][date]['impressions'],
+        dataObj['data'][testName]['variant'][date]['clicks'],
+        dataObj['data'][testName]['variant'][date]['conversions'],
+        dataObj['data'][testName]['variant'][date]['conversion_value']
+      ])
+    }
+  }
+
+  var exportRange = exportSheet.getRange(1, 1, outputEntities.length, outputEntities[0].length);
+  exportRange.setValues(outputEntities);
+  exportSheet.hideSheet();
+  Logger.log('Info: Sucessfully exported test data for test: ' + testName);
+  Logger.log(dataObj)
+   
 }
