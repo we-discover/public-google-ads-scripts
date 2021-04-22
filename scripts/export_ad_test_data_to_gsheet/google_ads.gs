@@ -6,7 +6,7 @@ function main() {
   const gsheetId = 'XXXXXXX';
 
   // Read all test configurations from GSheet
-  const testConfigurations = loadTestConfigsFromSheet(gsheetId);
+  var testConfigurations = loadTestConfigsFromSheet(gsheetId);
 
   // Determine runtime environment
   var executionContext = 'client_account';
@@ -41,35 +41,17 @@ function main() {
       }
     } catch (anyErrors) {
       Logger.log(anyErrors);
-      // Mark data export for test as failure
-      testConfigurations[i]['success'] = false;
       continue;
     }
-    // Mark data export for test as success
-    testConfigurations[i]['success'] = true;
   }
 
-  // Log test configurations with end state
+  // Tear down
   Logger.log(testConfigurations);
-
-  // Reset Test Name, Variant 1 and Variant 2
-  resetTestName(gsheetId)
-
-
-  // loop through all experiments defined in Experiment Details sheet
-  for (i = 1; i < expConfigurations['lastRow']; i++) {
-
-    // extract configurations for experiments data
-    extractDataForExperimentConfig(expConfigurations, i)
-
-    // export experiments data to evaluation sheet
-    exportDailyExperimentData(gsheetId, expConfigurations)
-  }
-
-
+  resetTestName(gsheetId); // Todo: What changes need to be made here?
 }
 
-// Process that is run on each account
+// Process that is run on each account to extract and populate
+// the 'data' element of each test config object
 function extractDataForTestConfig(testConfigurations, gsheetId) {
 
   // Loop through each test
@@ -78,6 +60,7 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
     // Load test configuration
     var config = testConfigurations[i];
     var accountTestMessage = (
+      ' type: ' + config.type
       ' test: ' + config.name +
       ' in account: ' + AdsApp.currentAccount().getName()
     );
@@ -99,19 +82,17 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
       continue;
     }
 
-    // Check if test exists in current account
-    var testLabelIds = getTestLabelIds(config);
-    if (testLabelIds.length < 1) {
-      Logger.log('Info: No matching labels found in account');
-      Logger.log('Info: Skipping export for:' + accountTestMessage);
-      continue;
-    }
-
+    // Extract data for the test, depending on its type
     try {
-      // Create a query to pull test data
-      var awqlQuery = buildQuery(config, testLabelIds);
-      // Query data for each ad in the test and aggregate
-      var aggTestData = queryAndAggregateData(config, awqlQuery);
+      if (test.type === 'Ads') {
+        // Create a query to pull test data
+        var awqlQuery = buildQuery(config);
+        // Query data for each ad in the test and aggregate
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+      }
+      if (test.type === 'D&E') {
+        // Todo: Extract test data it can be set for the test config
+      }
       config['data'] = aggTestData;
       if (Object.keys(aggTestData).length === 0) {
         Logger.log('Error: No data observed for test: ' + accountTestMessage);
@@ -247,31 +228,6 @@ function loadTestConfigsFromSheet(gsheetId) {
     return testConfigurations;
 }
 
-// Function to load experiments configurations from GSheet
-function loadExpConfigsFromSheet(gsheetId) {
-  
-  var expConfigurations = {}
-  
-  try {
-    var spreadsheet = SpreadsheetApp.openById(gsheetId);
-    Logger.log('Info: Sucessfully connected to sheet');
-  } catch (e) {
-    throw Error('Connection to sheet failed')
-  }
-  var experimentSheet = spreadsheet.getSheetByName('Experiment Details');
-  var experimentLastRow = experimentSheet.getLastRow();
-  var experimentSearchRange = experimentSheet.getRange(2, 1, experimentLastRow, 4);
-  
-  expConfigurations['sheet'] = experimentSheet
-  expConfigurations['lastRow'] = experimentLastRow
-  expConfigurations['searchRange'] = experimentSearchRange
-  expConfigurations['spreadsheet'] = spreadsheet
-  
-  return expConfigurations
-  
-}
-
-
 // Runs some basic alidation on a single test config
 function validateConfiguration(config) {
   function assert(check, condition) {
@@ -279,11 +235,13 @@ function validateConfiguration(config) {
       throw new Error('Validation failed: ' + check);
     }
   }
-  assert("start date formatted correctly", config.start_date.match('[0-9]{8}'));
-  assert("end date formatted correctly",  config.end_date.match('[0-9]{8}'));
-  assert("start date before end date", Number(config.start_date) < Number(config.end_date));
+  assert("supported test type", ['Ads', 'D&E'].includes(config.type));
+  if (config.type === 'Ads') {
+      assert("start date formatted correctly", config.start_date.match('[0-9]{8}'));
+      assert("end date formatted correctly",  config.end_date.match('[0-9]{8}'));
+    assert("start date before end date", Number(config.start_date) < Number(config.end_date));
+  }
 }
-
 
 // Query the current account to get label IDs
 function getTestLabelIds(config) {
@@ -297,9 +255,28 @@ function getTestLabelIds(config) {
     return labelIds;
 }
 
+// Extracts variant_id from labels
+function extractVariantIdFromLabels(config, labels) {
+  var mvtLabel = config.mvt_label;
+  var matches = labels.match('(' + mvtLabel + '\\$var_id:[0-9]{1,3})');
+  if (matches) {
+    var variantPart = matches[0].split('$')[1];
+    return variantPart.replace('var_id:', '');
+  }
+}
 
 // Builds a query to pull raw data for a single test
-function buildQuery(config, labelIds) {
+function buildQuery(config) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 1) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test
     return (" \
       SELECT \
           CustomerDescriptiveName \
@@ -321,15 +298,6 @@ function buildQuery(config, labelIds) {
 }
 
 
-// Extracts variant_id from labels
-function extractVariantIdFromLabels(config, labels) {
-  var mvtLabel = config.mvt_label;
-  var matches = labels.match('(' + mvtLabel + '\\$var_id:[0-9]{1,3})');
-  if (matches) {
-    var variantPart = matches[0].split('$')[1];
-    return variantPart.replace('var_id:', '');
-  }
-}
 
 
 // Runs AWQL query and aggregates data on a daily variant level
