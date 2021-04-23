@@ -48,7 +48,7 @@ function main() {
   // Tear down
   Logger.log(testConfigurations);
   // Todo: What changes need to be made here?
-  // resetTestName(gsheetId);
+  resetTestName(gsheetId);
 
 }
 
@@ -303,15 +303,15 @@ function getDraftAndExperimentData(config) {
       }
 
       var campaignTestVariants = {
-        'control': experiment.getBaseCampaign(),
-        'variant': experiment
+        'Control': experiment.getBaseCampaign(),
+        'Treatment': experiment
       }
-
+      
       // D&E can only have two variants, control and variant
       for (i=0; i < 2; i++) {
 
         var variantType = Object.keys(campaignTestVariants)[i];
-
+        
 
         if (!dataObj.hasOwnProperty(variantType)) {
           dataObj[variantType] = {};
@@ -331,7 +331,7 @@ function getDraftAndExperimentData(config) {
               'conversion_value': 0
             };
           }
-
+          
           var stats = campaignTestVariants[variantType].getStatsFor(
             Utilities.formatDate(date, timeZone, "yyyyMMdd"),
             Utilities.formatDate(date, timeZone, "yyyyMMdd")
@@ -423,36 +423,39 @@ function exportDataToSheet(gsheetId, config) {
 
 // Resets 'Test Name' dropdown on 'Test Evaluation' sheet so data displayed upon entry
 function resetTestName(gSheetId) {
-
+    
   // Sheets
   var spreadsheet = SpreadsheetApp.openById(gSheetId);
   var testEvalSheet = spreadsheet.getSheetByName('Test Evaluation: Overview');
-  var testDetailsSheet = spreadsheet.getSheetByName('Test details');
-
+  var testDetailsSheet = spreadsheet.getSheetByName('Ad Test Details');
+  
   // Ranges
-  var mainControlsRange = testEvalSheet.getRange(3, 11, 2, 1)
-  var abControlRange = testEvalSheet.getRange(40, 11, 1, 4)
+  var mainControlsRange = testEvalSheet.getRange(3, 11, 3, 1)
+  var abControlRange = testEvalSheet.getRange(41, 11, 1, 4)
   var detailsTestRange = testDetailsSheet.getRange(2, 2, 1, 1)
   var detailsVariantRange = testDetailsSheet.getRange(2, 4, 2, 1)
-
+  
   // Cells
-  var mainTestCell = mainControlsRange.getCell(1, 1)
+  var testTypeCell = mainControlsRange.getCell(1, 1)
+  var testNameCell = mainControlsRange.getCell(2, 1)
   var abtestVariant1Cell = abControlRange.getCell(1, 1)
   var abtestVariant2Cell = abControlRange.getCell(1, 4)
-
+  
   //Values
   var test1Cell = detailsTestRange.getCell(1, 1).getValue()
   var variant1Cell = detailsVariantRange.getCell(1, 1).getValue()
   var variant2Cell = detailsVariantRange.getCell(2, 1).getValue()
-
+  
   // Set all to empty
-  mainTestCell.setValue('')
+  testTypeCell.setValue('')
+  testNameCell.setValue('')
   abtestVariant1Cell.setValue('')
   abtestVariant2Cell.setValue('')
-
+  
   // Set all to first valid entries
-  mainTestCell.setValue(test1Cell)
+  testTypeCell.setValue('Ads Test')
+  testNameCell.setValue(test1Cell)
   abtestVariant1Cell.setValue(variant1Cell)
   abtestVariant2Cell.setValue(variant2Cell)
-
+  
 }
