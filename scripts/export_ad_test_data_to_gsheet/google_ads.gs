@@ -6,7 +6,7 @@ function main() {
   const gsheetId = 'XXXXXXX';
 
   // Read all test configurations from GSheet
-  const testConfigurations = loadTestConfigsFromSheet(gsheetId);
+  var testConfigurations = loadTestConfigsFromSheet(gsheetId);
 
   // Determine runtime environment
   var executionContext = 'client_account';
@@ -41,22 +41,19 @@ function main() {
       }
     } catch (anyErrors) {
       Logger.log(anyErrors);
-      // Mark data export for test as failure
-      testConfigurations[i]['success'] = false;
       continue;
     }
-    // Mark data export for test as success
-    testConfigurations[i]['success'] = true;
   }
 
-  // Log test configurations with end state
+  // Tear down
   Logger.log(testConfigurations);
-  
-  // Reset Test Name, Variant 1 and Variant 2
-  resetTestName(gsheetId)
+  // Todo: What changes need to be made here?
+  resetTestName(gsheetId);
+
 }
 
-// Process that is run on each account
+// Process that is run on each account to extract and populate
+// the 'data' element of each test config object
 function extractDataForTestConfig(testConfigurations, gsheetId) {
 
   // Loop through each test
@@ -65,6 +62,7 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
     // Load test configuration
     var config = testConfigurations[i];
     var accountTestMessage = (
+      ' type: ' + config.type +
       ' test: ' + config.name +
       ' in account: ' + AdsApp.currentAccount().getName()
     );
@@ -86,19 +84,21 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
       continue;
     }
 
-    // Check if test exists in current account
-    var testLabelIds = getTestLabelIds(config);
-    if (testLabelIds.length < 1) {
-      Logger.log('Info: No matching labels found in account');
-      Logger.log('Info: Skipping export for:' + accountTestMessage);
-      continue;
-    }
-
+    // Extract data for the test, depending on its type
     try {
-      // Create a query to pull test data
-      var awqlQuery = buildQuery(config, testLabelIds);
-      // Query data for each ad in the test and aggregate
-      var aggTestData = queryAndAggregateData(config, awqlQuery);
+      if (config.type === 'Ads') {
+        // Create a query to pull test data, aggregate against a label
+        try {
+          var awqlQuery = buildQueryForAdsTest(config, accountTestMessage);
+        } catch (e) {
+          continue; // Test not found
+        }
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+      }
+      if (config.type === 'D&E') {
+        // Identify experiment campaigns and their bases, extract data
+        var aggTestData = getDraftAndExperimentData(config);
+      }
       config['data'] = aggTestData;
       if (Object.keys(aggTestData).length === 0) {
         Logger.log('Error: No data observed for test: ' + accountTestMessage);
@@ -113,13 +113,43 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
   }
 
   return testConfigurations;
+
 }
 
 // ========= UTILITY FUNCTIONS ==============================================================
 
 
+// Extracts data from a test configuration sheet
+function extractConfigsFromConfigSheet(type, sheet) {
+    var configs = [];
+
+    var [rows, columns] = [sheet.getLastRow(), sheet.getLastColumn()];
+    var data = sheet.getRange(1, 1, rows, columns).getValues();
+    const header = data[0];
+
+    data.shift();
+    data.map(function(row) {
+      var empty = row[0] === '';
+      if (!empty) {
+        var config = header.reduce(function(o, h, i) {
+          o[h] = row[i];
+          return o;
+        }, {});
+        config['data'] = {};
+        config['success'] = false;
+        config['type'] = type;
+        configs.push(config);
+      }
+    });
+
+    return configs
+}
+
+
 // Function to load test configurations from GSheet
 function loadTestConfigsFromSheet(gsheetId) {
+    const testTypes = ['Ads', 'D&E']
+
     var testConfigurations = [];
 
     try {
@@ -130,25 +160,12 @@ function loadTestConfigsFromSheet(gsheetId) {
     }
 
     try {
-      var testConfigSheet = spreadsheet.getSheetByName('Google Ads - Test Details');
-
-      var [rows, columns] = [testConfigSheet.getLastRow(), testConfigSheet.getLastColumn()];
-      var data = testConfigSheet.getRange(1, 1, rows, columns).getValues();
-      const header = data[0];
-
-      data.shift();
-      data.map(function(row) {
-        var empty = row[0] === '';
-        if (!empty) {
-          var config = header.reduce(function(o, h, i) {
-            o[h] = row[i];
-            return o;
-          }, {});
-          config['data'] = {};
-          config['success'] = false;
-          testConfigurations.push(config);
-        }
-      });
+      for (i=0; i < testTypes.length; i++) {
+        var configSheetName = 'Google Ads Config - ' + testTypes[i];
+        var configSheet = spreadsheet.getSheetByName(configSheetName);
+        var typeConfigs = extractConfigsFromConfigSheet(testTypes[i], configSheet);
+        testConfigurations = testConfigurations.concat(typeConfigs);
+      }
     } catch (e) {
       throw Error('Failed to load test configurations from gsheet.')
     }
@@ -164,9 +181,12 @@ function validateConfiguration(config) {
       throw new Error('Validation failed: ' + check);
     }
   }
-  assert("start date formatted correctly", config.start_date.match('[0-9]{8}'));
-  assert("end date formatted correctly",  config.end_date.match('[0-9]{8}'));
-  assert("start date before end date", Number(config.start_date) < Number(config.end_date));
+  assert("supported test type", config.type.match('(Ads|D&E)'));
+  if (config.type === 'Ads') {
+      assert("start date formatted correctly", config.start_date.match('[0-9]{8}'));
+      assert("end date formatted correctly",  config.end_date.match('[0-9]{8}'));
+    assert("start date before end date", Number(config.start_date) < Number(config.end_date));
+  }
 }
 
 
@@ -183,8 +203,29 @@ function getTestLabelIds(config) {
 }
 
 
+// Extracts variant_id from labels
+function extractVariantIdFromLabels(config, labels) {
+  var mvtLabel = config.mvt_label;
+  var matches = labels.match('(' + mvtLabel + '\\$var_id:[0-9]{1,3})');
+  if (matches) {
+    var variantPart = matches[0].split('$')[1];
+    return variantPart.replace('var_id:', '');
+  }
+}
+
+
 // Builds a query to pull raw data for a single test
-function buildQuery(config, labelIds) {
+function buildQueryForAdsTest(config, accountTestMessage) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test
     return (" \
       SELECT \
           CustomerDescriptiveName \
@@ -198,22 +239,11 @@ function buildQuery(config, labelIds) {
       FROM \
         AD_PERFORMANCE_REPORT \
       WHERE \
-        Labels CONTAINS_ANY [" + labelIds.join(',') + "] \
+        Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
         AND Impressions > 0 \
       DURING " +
         config.start_date + "," + config.end_date
     ).replace(/ +(?= )/g, '');
-}
-
-
-// Extracts variant_id from labels
-function extractVariantIdFromLabels(config, labels) {
-  var mvtLabel = config.mvt_label;
-  var matches = labels.match('(' + mvtLabel + '\\$var_id:[0-9]{1,3})');
-  if (matches) {
-    var variantPart = matches[0].split('$')[1];
-    return variantPart.replace('var_id:', '');
-  }
 }
 
 
@@ -248,6 +278,74 @@ function queryAndAggregateData(config, awqlQuery) {
       dataObj[varId][date]['clicks'] += Number(result["Clicks"].replace(',', '')) || 0;
       dataObj[varId][date]['conversions'] += Number(result["Conversions"].replace(',', '')) || 0;
       dataObj[varId][date]['conversion_value'] += Number(result["ConversionValue"].replace(',', '')) || 0;
+    }
+
+    return dataObj;
+}
+
+
+// Identify experiment campaigns and extract data for it and its base campaign
+function getDraftAndExperimentData(config) {
+
+    var dataObj = config['data'];
+
+    var timeZone = AdsApp.currentAccount().getTimeZone();
+
+    var campaignIterator = AdsApp.campaigns()
+        .withCondition("Name CONTAINS " + config.mvt_label)
+        .get();
+
+    // Identify campaigns and experiments belonging to the test and extract the data
+    while (campaignIterator.hasNext()) {
+      const experiment = campaignIterator.next();
+      if (!experiment.isExperimentCampaign()) {
+        throw new Exception('Campaign experiment identification issue')
+      }
+
+      var campaignTestVariants = {
+        'Control': experiment.getBaseCampaign(),
+        'Treatment': experiment
+      }
+      
+      // D&E can only have two variants, control and variant
+      for (i=0; i < 2; i++) {
+
+        var variantType = Object.keys(campaignTestVariants)[i];
+        
+
+        if (!dataObj.hasOwnProperty(variantType)) {
+          dataObj[variantType] = {};
+        }
+
+        var date = new Date(config.start_date);
+        while (date <= config.end_date) {
+
+          var dateKey = Utilities.formatDate(date, timeZone, "dd/MM/yyyy");
+
+          if (!dataObj[variantType].hasOwnProperty(dateKey)) {
+            dataObj[variantType][dateKey] = {
+              'cost': 0,
+              'impressions': 0,
+              'clicks': 0,
+              'conversions': 0,
+              'conversion_value': 0
+            };
+          }
+          
+          var stats = campaignTestVariants[variantType].getStatsFor(
+            Utilities.formatDate(date, timeZone, "yyyyMMdd"),
+            Utilities.formatDate(date, timeZone, "yyyyMMdd")
+          )
+
+          dataObj[variantType][dateKey]['cost'] += stats.getCost();
+          dataObj[variantType][dateKey]['impressions'] += stats.getImpressions();
+          dataObj[variantType][dateKey]['clicks'] += stats.getClicks();
+          dataObj[variantType][dateKey]['conversions'] += stats.getConversions();
+          // Todo: Find alternative for conversion value
+
+          date.setDate(date.getDate() + 1);
+        }
+      }
     }
 
     return dataObj;
@@ -329,16 +427,17 @@ function resetTestName(gSheetId) {
   // Sheets
   var spreadsheet = SpreadsheetApp.openById(gSheetId);
   var testEvalSheet = spreadsheet.getSheetByName('Test Evaluation: Overview');
-  var testDetailsSheet = spreadsheet.getSheetByName('Test details');
+  var testDetailsSheet = spreadsheet.getSheetByName('Ad Test Details');
   
   // Ranges
-  var mainControlsRange = testEvalSheet.getRange(3, 11, 2, 1)
-  var abControlRange = testEvalSheet.getRange(40, 11, 1, 4)
+  var mainControlsRange = testEvalSheet.getRange(3, 11, 3, 1)
+  var abControlRange = testEvalSheet.getRange(41, 11, 1, 4)
   var detailsTestRange = testDetailsSheet.getRange(2, 2, 1, 1)
   var detailsVariantRange = testDetailsSheet.getRange(2, 4, 2, 1)
   
   // Cells
-  var mainTestCell = mainControlsRange.getCell(1, 1)
+  var testTypeCell = mainControlsRange.getCell(1, 1)
+  var testNameCell = mainControlsRange.getCell(2, 1)
   var abtestVariant1Cell = abControlRange.getCell(1, 1)
   var abtestVariant2Cell = abControlRange.getCell(1, 4)
   
@@ -348,12 +447,14 @@ function resetTestName(gSheetId) {
   var variant2Cell = detailsVariantRange.getCell(2, 1).getValue()
   
   // Set all to empty
-  mainTestCell.setValue('')
+  testTypeCell.setValue('')
+  testNameCell.setValue('')
   abtestVariant1Cell.setValue('')
   abtestVariant2Cell.setValue('')
   
   // Set all to first valid entries
-  mainTestCell.setValue(test1Cell)
+  testTypeCell.setValue('Ads Test')
+  testNameCell.setValue(test1Cell)
   abtestVariant1Cell.setValue(variant1Cell)
   abtestVariant2Cell.setValue(variant2Cell)
   
