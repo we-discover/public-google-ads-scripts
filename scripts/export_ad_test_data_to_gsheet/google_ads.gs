@@ -297,58 +297,57 @@ function getDraftAndExperimentData(config) {
 
     // Identify campaigns and experiments belonging to the test and extract the data
     while (campaignIterator.hasNext()) {
-        const experiment = campaignIterator.next();
-        if (!experiment.isExperimentCampaign()) {
-            throw new Exception('Campaign experiment identification issue')
+      const experiment = campaignIterator.next();
+      if (!experiment.isExperimentCampaign()) {
+        throw new Exception('Campaign experiment identification issue')
+      }
+
+      var campaignTestVariants = {
+        'control': experiment.getBaseCampaign(),
+        'variant': experiment
+      }
+
+      // D&E can only have two variants, control and variant
+      for (i=0; i < 2; i++) {
+
+        var variantType = Object.keys(campaignTestVariants)[i];
+
+
+        if (!dataObj.hasOwnProperty(variantType)) {
+          dataObj[variantType] = {};
         }
 
-        var campaignTestVariants = {
-            'control': experiment.getBaseCampaign(),
-            'variant': experiment
+        var date = new Date(config.start_date);
+        while (date <= config.end_date) {
+
+          var dateKey = Utilities.formatDate(date, timeZone, "dd/MM/yyyy");
+
+          if (!dataObj[variantType].hasOwnProperty(dateKey)) {
+            dataObj[variantType][dateKey] = {
+              'cost': 0,
+              'impressions': 0,
+              'clicks': 0,
+              'conversions': 0,
+              'conversion_value': 0
+            };
+          }
+
+          var stats = campaignTestVariants[variantType].getStatsFor(
+            Utilities.formatDate(date, timeZone, "yyyyMMdd"),
+            Utilities.formatDate(date, timeZone, "yyyyMMdd")
+          )
+
+          dataObj[variantType][dateKey]['cost'] += stats.getCost();
+          dataObj[variantType][dateKey]['impressions'] += stats.getImpressions();
+          dataObj[variantType][dateKey]['clicks'] += stats.getClicks();
+          dataObj[variantType][dateKey]['conversions'] += stats.getConversions();
+          // Todo: Find alternative for conversion value
+
+          date.setDate(date.getDate() + 1);
         }
-
-        // D&E can only have two variants, control and variant
-        for (i=0; i < 2; i++) {
-            var variantType = Object.keys(campaignTestVariants)[i];
-
-            if (!dataObj.hasOwnProperty(variantType)) {
-                dataObj[variantType] = {};
-            }
-
-            Logger.log(variantType);
-
-            var date = config.start_date;
-            while (date <= config.end_date) {
-
-                var dateKey = Utilities.formatDate(date, timeZone, "dd/MM/yyyy");
-                // Todo: For some reason doesn't seem to be entering the loop again for the variant
-                Logger.log(dateKey);
-
-                if (!dataObj[variantType].hasOwnProperty(dateKey)) {
-                    dataObj[variantType][dateKey] = {
-                        'cost': 0,
-                        'impressions': 0,
-                        'clicks': 0,
-                        'conversions': 0,
-                        'conversion_value': 0
-                    };
-                }
-
-                var stats = campaignTestVariants[variantType].getStatsFor(
-                    Utilities.formatDate(date, timeZone, "yyyyMMdd"),
-                    Utilities.formatDate(date, timeZone, "yyyyMMdd")
-                )
-
-                dataObj[variantType][dateKey]['cost'] += stats.getCost();
-                dataObj[variantType][dateKey]['impressions'] += stats.getImpressions();
-                dataObj[variantType][dateKey]['clicks'] += stats.getClicks();
-                dataObj[variantType][dateKey]['conversions'] += stats.getConversions();
-                // Todo: Find alternative for conversion value
-
-                date.setDate(date.getDate() + 1);
-            }
-        }
+      }
     }
+
     return dataObj;
 }
 
@@ -424,36 +423,36 @@ function exportDataToSheet(gsheetId, config) {
 
 // Resets 'Test Name' dropdown on 'Test Evaluation' sheet so data displayed upon entry
 function resetTestName(gSheetId) {
-    
+
   // Sheets
   var spreadsheet = SpreadsheetApp.openById(gSheetId);
   var testEvalSheet = spreadsheet.getSheetByName('Test Evaluation: Overview');
   var testDetailsSheet = spreadsheet.getSheetByName('Test details');
-  
+
   // Ranges
   var mainControlsRange = testEvalSheet.getRange(3, 11, 2, 1)
   var abControlRange = testEvalSheet.getRange(40, 11, 1, 4)
   var detailsTestRange = testDetailsSheet.getRange(2, 2, 1, 1)
   var detailsVariantRange = testDetailsSheet.getRange(2, 4, 2, 1)
-  
+
   // Cells
   var mainTestCell = mainControlsRange.getCell(1, 1)
   var abtestVariant1Cell = abControlRange.getCell(1, 1)
   var abtestVariant2Cell = abControlRange.getCell(1, 4)
-  
+
   //Values
   var test1Cell = detailsTestRange.getCell(1, 1).getValue()
   var variant1Cell = detailsVariantRange.getCell(1, 1).getValue()
   var variant2Cell = detailsVariantRange.getCell(2, 1).getValue()
-  
+
   // Set all to empty
   mainTestCell.setValue('')
   abtestVariant1Cell.setValue('')
   abtestVariant2Cell.setValue('')
-  
+
   // Set all to first valid entries
   mainTestCell.setValue(test1Cell)
   abtestVariant1Cell.setValue(variant1Cell)
   abtestVariant2Cell.setValue(variant2Cell)
-  
+
 }
