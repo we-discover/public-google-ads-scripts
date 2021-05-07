@@ -87,13 +87,33 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
     // Extract data for the test, depending on its type
     try {
       if (config.type === 'Ads') {
-        // Create a query to pull test data, aggregate against a label
+        
+        // Create a query to pull Ad level test data, aggregate against a label
         try {
           var awqlQuery = buildQueryForAdsTest(config, accountTestMessage);
         } catch (e) {
           continue; // Test not found
         }
         var aggTestData = queryAndAggregateData(config, awqlQuery);
+       
+        
+        // Create a query to pull Ad Group level test data, aggregate against a label
+        try {
+          var awqlQuery = buildQueryForAdGroupTest(config, accountTestMessage);
+        } catch (e) {
+          continue; // Test not found
+        }
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+        
+        
+        // Create a query to pull Campaign level test data, aggregate against a label
+        try {
+          var awqlQuery = buildQueryForCampaignTest(config, accountTestMessage);
+        } catch (e) {
+          continue; // Test not found
+        }
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+        
       }
       if (config.type === 'D&E') {
         // Identify experiment campaigns and their bases, extract data
@@ -192,7 +212,7 @@ function validateConfiguration(config) {
 
 // Query the current account to get label IDs
 function getTestLabelIds(config) {
-    var labelIds = [];
+    var labelIds = [];  
     var labelIterator = AdsApp.labels()
       .withCondition("Name CONTAINS '" + config.mvt_label + "'")
       .get();
@@ -225,7 +245,7 @@ function buildQueryForAdsTest(config, accountTestMessage) {
         throw new Error('Test not found')
     }
 
-    // Build query to extract the test data for an 'Ads' type test
+    // Build query to extract the test data for an 'Ads' type test at Ad level
     return (" \
       SELECT \
           CustomerDescriptiveName \
@@ -238,6 +258,70 @@ function buildQueryForAdsTest(config, accountTestMessage) {
         , ConversionValue \
       FROM \
         AD_PERFORMANCE_REPORT \
+      WHERE \
+        Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
+        AND Impressions > 0 \
+      DURING " +
+        config.start_date + "," + config.end_date
+    ).replace(/ +(?= )/g, '');
+}
+
+
+function buildQueryForAdGroupTest(config, accountTestMessage) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test at Ad Group level
+    return (" \
+      SELECT \
+          CustomerDescriptiveName \
+        , Labels \
+        , Date \
+        , Cost \
+        , Impressions \
+        , Clicks \
+        , Conversions \
+        , ConversionValue \
+      FROM \
+        ADGROUP_PERFORMANCE_REPORT \
+      WHERE \
+        Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
+        AND Impressions > 0 \
+      DURING " +
+        config.start_date + "," + config.end_date
+    ).replace(/ +(?= )/g, '');
+}
+
+
+function buildQueryForCampaignTest(config, accountTestMessage) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test at Campaign level
+    return (" \
+      SELECT \
+          CustomerDescriptiveName \
+        , Labels \
+        , Date \
+        , Cost \
+        , Impressions \
+        , Clicks \
+        , Conversions \
+        , ConversionValue \
+      FROM \
+        CAMPAIGN_PERFORMANCE_REPORT \
       WHERE \
         Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
         AND Impressions > 0 \
