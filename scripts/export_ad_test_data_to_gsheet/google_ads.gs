@@ -10,6 +10,8 @@ Description: This script exports campaign data from Google Ads for tagged Campai
              
 License: https://github.com/we-discover/public-google-scripts/blob/main/LICENSE
 
+Version: 2.3.1
+
 Release Date: ******* 2021 
 
 */
