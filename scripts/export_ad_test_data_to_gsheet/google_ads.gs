@@ -1,3 +1,18 @@
+/*
+
+Name: WeDiscover - Experimentation Toolkit, Google Ads Script
+
+Description: This script exports campaign data from Google Ads for tagged Campaigns,
+             AdGroups and Ads, to perform statistical comparisons betweeen different variants.
+             It may also be used in conjunction with the Google Ads - Drafts and Experiments
+             functionality, exporting data for both Treatment and Control groups, and importing
+             this to the specified Google Sheet for the purposes of statistical testing.
+             
+License: https://github.com/we-discover/public-google-scripts/blob/main/LICENSE
+
+Release Date: ******* 2021 
+
+*/
 
 // Entrypoint for script
 function main() {
@@ -47,9 +62,7 @@ function main() {
 
   // Tear down
   Logger.log(testConfigurations);
-  // Todo: What changes need to be made here?
   resetTestName(gsheetId);
-
 }
 
 // Process that is run on each account to extract and populate
@@ -174,7 +187,7 @@ function loadTestConfigsFromSheet(gsheetId) {
 }
 
 
-// Runs some basic alidation on a single test config
+// Runs some basic validation on a single test config
 function validateConfiguration(config) {
   function assert(check, condition) {
     if (!condition) {
