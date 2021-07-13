@@ -16,6 +16,19 @@ Release Date: ******* 2021
 
 */
 
+/*
+Name: WeDiscover - Experimentation Toolkit, Google Ads Script
+Description: This script exports campaign data from Google Ads for tagged Campaigns,
+             AdGroups and Ads, to perform statistical comparisons betweeen different variants.
+             It may also be used in conjunction with the Google Ads - Drafts and Experiments
+             functionality, exporting data for both Treatment and Control groups, and importing
+             this to the specified Google Sheet for the purposes of statistical testing.
+             
+License: https://github.com/we-discover/public-google-scripts/blob/main/LICENSE
+Version: 2.3.1
+Release Date: ******* 2021 
+*/
+
 // Entrypoint for script
 function main() {
 
@@ -76,6 +89,7 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
 
     // Load test configuration
     var config = testConfigurations[i];
+    Logger.log(config)
     var accountTestMessage = (
       ' type: ' + config.type +
       ' test: ' + config.name +
@@ -102,17 +116,40 @@ function extractDataForTestConfig(testConfigurations, gsheetId) {
     // Extract data for the test, depending on its type
     try {
       if (config.type === 'Ads') {
-        // Create a query to pull test data, aggregate against a label
+        
+        // Create a query to pull Ad level test data, aggregate against a label
         try {
           var awqlQuery = buildQueryForAdsTest(config, accountTestMessage);
         } catch (e) {
           continue; // Test not found
         }
         var aggTestData = queryAndAggregateData(config, awqlQuery);
+       
+        
+        // Create a query to pull Ad Group level test data, aggregate against a label
+        try {
+          var awqlQuery = buildQueryForAdGroupTest(config, accountTestMessage);
+        } catch (e) {
+          continue; // Test not found
+        }
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+        
+        
+        // Create a query to pull Campaign level test data, aggregate against a label
+        try {
+          var awqlQuery = buildQueryForCampaignTest(config, accountTestMessage);
+        } catch (e) {
+          continue; // Test not found
+        }
+        var aggTestData = queryAndAggregateData(config, awqlQuery);
+        
       }
       if (config.type === 'D&E') {
+        
+        
         // Identify experiment campaigns and their bases, extract data
-        var aggTestData = getDraftAndExperimentData(config);
+        var aggTestData = getDraftAndExperimentData(config, accountTestMessage);
+        
       }
       config['data'] = aggTestData;
       if (Object.keys(aggTestData).length === 0) {
@@ -207,7 +244,7 @@ function validateConfiguration(config) {
 
 // Query the current account to get label IDs
 function getTestLabelIds(config) {
-    var labelIds = [];
+    var labelIds = [];  
     var labelIterator = AdsApp.labels()
       .withCondition("Name CONTAINS '" + config.mvt_label + "'")
       .get();
@@ -240,7 +277,7 @@ function buildQueryForAdsTest(config, accountTestMessage) {
         throw new Error('Test not found')
     }
 
-    // Build query to extract the test data for an 'Ads' type test
+    // Build query to extract the test data for an 'Ads' type test at Ad level
     return (" \
       SELECT \
           CustomerDescriptiveName \
@@ -255,6 +292,101 @@ function buildQueryForAdsTest(config, accountTestMessage) {
         AD_PERFORMANCE_REPORT \
       WHERE \
         Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
+        AND Impressions > 0 \
+      DURING " +
+        config.start_date + "," + config.end_date
+    ).replace(/ +(?= )/g, '');
+}
+
+
+function buildQueryForAdGroupTest(config, accountTestMessage) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test at Ad Group level
+    return (" \
+      SELECT \
+          CustomerDescriptiveName \
+        , Labels \
+        , Date \
+        , Cost \
+        , Impressions \
+        , Clicks \
+        , Conversions \
+        , ConversionValue \
+      FROM \
+        ADGROUP_PERFORMANCE_REPORT \
+      WHERE \
+        Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
+        AND Impressions > 0 \
+      DURING " +
+        config.start_date + "," + config.end_date
+    ).replace(/ +(?= )/g, '');
+}
+
+
+function buildQueryForCampaignTest(config, accountTestMessage) {
+
+    // Check if test labels exists in current account
+    var testLabelIds = getTestLabelIds(config);
+    if (testLabelIds.length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test at Campaign level
+    return (" \
+      SELECT \
+          CustomerDescriptiveName \
+        , Labels \
+        , Date \
+        , Cost \
+        , Impressions \
+        , Clicks \
+        , Conversions \
+        , ConversionValue \
+      FROM \
+        CAMPAIGN_PERFORMANCE_REPORT \
+      WHERE \
+        Labels CONTAINS_ANY [" + testLabelIds.join(',') + "] \
+        AND Impressions > 0 \
+      DURING " +
+        config.start_date + "," + config.end_date
+    ).replace(/ +(?= )/g, '');
+}
+
+
+function buildQueryForDnETest(config, accountTestMessage, campaignTestVariants, campaignId) {
+
+    // Check if test labels exists in current account
+    if ((Object.keys(campaignTestVariants)).length < 2) {
+        Logger.log('Info: No matching labels found in account');
+        Logger.log('Info: Skipping export for:' + accountTestMessage);
+        throw new Error('Test not found')
+    }
+
+    // Build query to extract the test data for an 'Ads' type test at Campaign level
+    return (" \
+      SELECT \
+          CustomerDescriptiveName \
+        , Labels \
+        , Date \
+        , Cost \
+        , Impressions \
+        , Clicks \
+        , Conversions \
+        , ConversionValue \
+      FROM \
+        CAMPAIGN_PERFORMANCE_REPORT \
+      WHERE \
+        CampaignId = " + campaignId + " \
         AND Impressions > 0 \
       DURING " +
         config.start_date + "," + config.end_date
@@ -300,9 +432,10 @@ function queryAndAggregateData(config, awqlQuery) {
 
 
 // Identify experiment campaigns and extract data for it and its base campaign
-function getDraftAndExperimentData(config) {
+function getDraftAndExperimentData(config, accountTestMessage) {
 
     var dataObj = config['data'];
+    var campaignIds = [];
 
     var timeZone = AdsApp.currentAccount().getTimeZone();
 
@@ -314,20 +447,50 @@ function getDraftAndExperimentData(config) {
     while (campaignIterator.hasNext()) {
       const experiment = campaignIterator.next();
       if (!experiment.isExperimentCampaign()) {
-        throw new Exception('Campaign experiment identification issue')
-      }
+        throw new Error('Campaign experiment identification issue')
+      };
 
       var campaignTestVariants = {
-        'Control': experiment.getBaseCampaign(),
-        'Treatment': experiment
-      }
+        'Control': experiment.getBaseCampaign().getId(),
+        'Treatment': experiment.getId()
+      };
+      
+      Logger.log(campaignTestVariants);
+      
+      
       
       // D&E can only have two variants, control and variant
+      for (var [key, value] in campaignTestVariants) {
+        Logger.log(key + value);
+        
+        
+        Logger.log(config.start_date)
+        Logger.log(config.end_date)
+        Logger.log((Object.keys(campaignTestVariants)).length)
+
+        var awqlQuery = buildQueryForDnETest(config, accountTestMessage, campaignTestVariants, value)
+        Logger.log(awqlQuery)
+
+        var dataObj = queryAndAggregateData(config, awqlQuery)
+        Logger.log(dataObj)
+      }
+      
+
+      
+      
+      
+      /*
       for (i=0; i < 2; i++) {
 
         var variantType = Object.keys(campaignTestVariants)[i];
+        Logger.log(variantType)
+        var variantId = campaignTestVariants.variantType
+        Logger.log(variantId)
+        
+      }
         
 
+        
         if (!dataObj.hasOwnProperty(variantType)) {
           dataObj[variantType] = {};
         }
@@ -361,9 +524,11 @@ function getDraftAndExperimentData(config) {
           date.setDate(date.getDate() + 1);
         }
       }
+      */
+      return dataObj;
     }
 
-    return dataObj;
+    
 }
 
 
